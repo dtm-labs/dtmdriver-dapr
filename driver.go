@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"log"
-
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/resolver"
@@ -14,22 +12,19 @@ import (
 
 	pb "github.com/dapr/dapr/pkg/proto/runtime/v1"
 	"github.com/dtm-labs/dtmdriver"
+	"github.com/dtm-labs/logger"
 	"github.com/go-resty/resty/v2"
 )
 
 const (
 	DriverName = "dtm-driver-dapr"
 
-	format   = "<schema>://<host>/<dapr-app-id>/<method-name>"
-	cDaprEnv = "DAPR_ENV"
-	cAppid   = "dapr-app-id"
-	// daprh://localhost/v1.0/invoke/[dapr-app-id]/method
-	SchemaHTTP = "daprhttp"
-	// daprho://localhost/[dapr-app-id]/[oldpath]
+	format            = "<schema>://<host>/<dapr-app-id>/<method-name>"
+	cDaprEnv          = "DAPR_ENV"
+	cAppid            = "dapr-app-id"
+	SchemaHTTP        = "daprhttp"
 	SchemaProxiedHTTP = "daprphttp"
-	// daprg://localhost/[dapr-app-id]/[method]/dapr.proto.runtime.v1.Dapr/InvokeService
-	SchemaGrpc = "daprgrpc"
-	// daprgo://localhost/[dapr-app-id]/[oldpath]
+	SchemaGrpc        = "daprgrpc"
 	SchemaProxiedGrpc = "daprpgrpc"
 )
 
@@ -57,7 +52,9 @@ func (z *darpDriver) RegisterAddrResolver() {
 				r.Message.Method = method2
 			}
 			req2, ok := req.(*pb.InvokeServiceRequest)
-			if !ok { // if dtm server call branch directly, req is type of []byte
+			if ok { // if dtm SDK call branch, req is type of *pb.InvokeServiceRequest
+				updateReq(req2)
+			} else { // if dtm server call branch directly, req is type of []byte
 				var req3 pb.InvokeServiceRequest
 				err := proto.Unmarshal(req.([]byte), &req3)
 				if err == nil {
@@ -67,12 +64,10 @@ func (z *darpDriver) RegisterAddrResolver() {
 				if err != nil {
 					return err
 				}
-			} else { // if dtm SDK call branch, req is type of *pb.InvokeServiceRequest
-				updateReq(req2)
 			}
 			method = "/dapr.proto.runtime.v1.Dapr/InvokeService"
 		}
-		log.Printf("target: %s, method: %s", target, method)
+		logger.Debugf("invoking target: %s, method: %s", target, method)
 		return invoker(ctx, method, req, reply, cc, opts...)
 	})
 
@@ -84,12 +79,14 @@ func (z *darpDriver) RegisterAddrResolver() {
 		if err != nil {
 			return err
 		}
+		old := r.URL
 		if addr.Schema == SchemaProxiedHTTP {
 			r.SetHeader(cAppid, addr.Appid)
 			r.URL = fmt.Sprintf("http://%s/%s", addr.Host, addr.MethodName)
 		} else if addr.Schema == SchemaHTTP {
-			r.URL = fmt.Sprintf("http://%s/v1.0/invoke/%s/%s", addr.Host, addr.Appid, addr.MethodName)
+			r.URL = fmt.Sprintf("http://%s/v1.0/invoke/%s/method/%s", addr.Host, addr.Appid, addr.MethodName)
 		}
+		logger.Debugf("url %s resolved to %s", old, r.URL)
 		return nil
 	})
 }

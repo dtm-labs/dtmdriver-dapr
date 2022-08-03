@@ -2,13 +2,13 @@ package daprdriver
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"strings"
 
 	v1 "github.com/dapr/dapr/pkg/proto/common/v1"
 	pb "github.com/dapr/dapr/pkg/proto/runtime/v1"
 	"github.com/dtm-labs/dtmdriver"
+	"github.com/dtm-labs/logger"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -44,7 +44,7 @@ func ParseDaprUrl(uri string) (DaprAddr, error) {
 	if len(fs) > 4 {
 		res.MethodName = strings.Join(fs[4:], "/")
 	}
-	log.Printf("addr is %v", res)
+	logger.Debugf("uri %s parsed result is %v", uri, res)
 	return res, nil
 }
 
@@ -81,10 +81,10 @@ func PayloadForGrpc(data []byte) *pb.InvokeServiceRequest {
 	return &pb.InvokeServiceRequest{
 		Id: "dummy-id",
 		Message: &v1.InvokeRequest{
-			Data:        &anypb.Any{Value: data},
-			Method:      "dummy-method",
-			ContentType: "application/json",
-			// HttpExtension: &v1.HTTPExtension{Verb: v1.HTTPExtension_Verb(3), Querystring: "a=1"},
+			Data:          &anypb.Any{Value: data},
+			Method:        "dummy-method",
+			ContentType:   "application/json",
+			HttpExtension: &v1.HTTPExtension{Verb: v1.HTTPExtension_Verb(3), Querystring: "a=1"},
 		},
 	}
 }
