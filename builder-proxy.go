@@ -1,7 +1,7 @@
 package daprdriver
 
 import (
-	"os"
+	"log"
 
 	"google.golang.org/grpc/resolver"
 )
@@ -10,8 +10,9 @@ type proxyBuilder struct{}
 
 func (d *proxyBuilder) Build(target resolver.Target, cc resolver.ClientConn, _ resolver.BuildOptions) (
 	resolver.Resolver, error) {
+	log.Printf("in builder: host is: %s", getDaprHost(SchemaProxiedGrpc, target.URL.Host))
 	if err := cc.UpdateState(resolver.State{
-		Addresses: []resolver.Address{resolver.Address{Addr: os.Getenv("DAPR_GRPC_HOST") + ":" + os.Getenv("DAPR_GRPC_PORT")}},
+		Addresses: []resolver.Address{{Addr: getDaprHost(SchemaProxiedGrpc, target.URL.Host)}},
 	}); err != nil {
 		return nil, err
 	}
@@ -20,5 +21,5 @@ func (d *proxyBuilder) Build(target resolver.Target, cc resolver.ClientConn, _ r
 }
 
 func (d *proxyBuilder) Scheme() string {
-	return spGrpc
+	return SchemaProxiedGrpc
 }

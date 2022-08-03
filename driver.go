@@ -3,8 +3,9 @@ package daprdriver
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
+
+	"log"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -23,13 +24,13 @@ const (
 	cDaprEnv = "DAPR_ENV"
 	cAppid   = "dapr-app-id"
 	// daprh://localhost/v1.0/invoke/[dapr-app-id]/method
-	sHTTP = "daprhttp"
+	SchemaHTTP = "daprhttp"
 	// daprho://localhost/[dapr-app-id]/[oldpath]
-	spHTTP = "daprphttp"
+	SchemaProxiedHTTP = "daprphttp"
 	// daprg://localhost/[dapr-app-id]/[method]/dapr.proto.runtime.v1.Dapr/InvokeService
-	sGrpc = "daprgrpc"
+	SchemaGrpc = "daprgrpc"
 	// daprgo://localhost/[dapr-app-id]/[oldpath]
-	spGrpc = "daprpgrpc"
+	SchemaProxiedGrpc = "daprpgrpc"
 )
 
 type (
@@ -47,33 +48,34 @@ func (z *darpDriver) RegisterAddrResolver() {
 		if err != nil {
 			return err
 		}
-		if addr.Schema == spGrpc {
+		if addr.Schema == SchemaProxiedGrpc {
 			ctx = metadata.AppendToOutgoingContext(ctx, cAppid, addr.Appid)
-		} else if addr.Schema == sGrpc {
-			fmt.Printf("target: %s, method: %s\n", target, method)
+		} else if addr.Schema == SchemaGrpc {
 			method2 := strings.TrimPrefix(method, "/")
 			updateReq := func(r *pb.InvokeServiceRequest) {
 				r.Id = addr.Appid
 				r.Message.Method = method2
 			}
 			req2, ok := req.(*pb.InvokeServiceRequest)
-			if !ok {
+			if !ok { // if dtm server call branch directly, req is type of []byte
 				var req3 pb.InvokeServiceRequest
 				err := proto.Unmarshal(req.([]byte), &req3)
+				if err == nil {
+					updateReq(&req3)
+					req, err = proto.Marshal(&req3)
+				}
 				if err != nil {
 					return err
 				}
-				updateReq(&req3)
-				req, err = proto.Marshal(&req3)
-				if err != nil {
-					return err
-				}
-			} else {
+			} else { // if dtm SDK call branch, req is type of *pb.InvokeServiceRequest
 				updateReq(req2)
 			}
+			method = "/dapr.proto.runtime.v1.Dapr/InvokeService"
 		}
+		log.Printf("target: %s, method: %s", target, method)
 		return invoker(ctx, method, req, reply, cc, opts...)
 	})
+
 	resolver.Register(&proxyBuilder{})
 	resolver.Register(&daprBuilder{})
 
@@ -82,10 +84,10 @@ func (z *darpDriver) RegisterAddrResolver() {
 		if err != nil {
 			return err
 		}
-		if addr.Schema == spHTTP {
+		if addr.Schema == SchemaProxiedHTTP {
 			r.SetHeader(cAppid, addr.Appid)
 			r.URL = fmt.Sprintf("http://%s/%s", addr.Host, addr.MethodName)
-		} else if addr.Schema == sHTTP {
+		} else if addr.Schema == SchemaHTTP {
 			r.URL = fmt.Sprintf("http://%s/v1.0/invoke/%s/%s", addr.Host, addr.Appid, addr.MethodName)
 		}
 		return nil
@@ -97,19 +99,13 @@ func (z *darpDriver) RegisterService(target string, endpoint string) error {
 }
 
 func (z *darpDriver) ParseServerMethod(uri string) (server string, method string, err error) {
-	fs := strings.Split(uri, "/")
-	if len(fs) < 5 {
-		return "", "", fmt.Errorf("dapr url format, should be %s but got: %s", format, uri)
-	}
-	schema := fs[0]
-	host := fs[2]
-	appid := fs[3]
-
-	if host == cDaprEnv {
-		host = os.Getenv("DAPR_HTTP_HOST") + ":" + os.Getenv("DAPR_HTTP_PORT")
+	addr, err := ParseDaprUrl(uri)
+	if addr.Schema == "" {
+		fs := strings.Split(uri, "/")
+		return fs[0], "/" + strings.Join(fs[1:], "/"), nil
 	}
 
-	return fmt.Sprintf("%s://%s/%s", schema, host, appid), "/" + strings.Join(fs[4:], "/"), nil
+	return fmt.Sprintf("%s://%s/%s", addr.Schema, addr.Host, addr.Appid), "/" + addr.MethodName, err
 }
 
 func init() {
